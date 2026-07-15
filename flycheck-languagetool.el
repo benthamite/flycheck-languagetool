@@ -210,36 +210,33 @@ STATUS is passed from `url-retrieve'.
 SOURCE-BUFFER is the buffer currently being checked.
 CALLBACK is passed from Flycheck."
   (let ((err (plist-get status :error)))
-    (when err
-      (error
-       (funcall callback 'errored
-                (error-message-string
-                 (append err
-                         (list (progn
-                                 (goto-char (+ 1 url-http-end-of-headers))
-                                 (buffer-substring (point) (point-max))))))))))
-
-  (if (buffer-live-p source-buffer)
-      (progn
-        (set-buffer-multibyte t)
-        (goto-char url-http-end-of-headers)
-        (let ((results (car (flycheck-parse-json
-                             (buffer-substring (point) (point-max))))))
-          (kill-buffer)
+    (cond
+     ((not (buffer-live-p source-buffer))
+      (kill-buffer)
+      (funcall callback 'interrupted nil))
+     (err
+      (unwind-protect
           (with-current-buffer source-buffer
-            (condition-case err
-                (funcall
-                 callback 'finished
-                 (flycheck-increment-error-columns
-                  (mapcar
-                   (lambda (x)
-                     (apply #'flycheck-error-new-at
-                            `(,@x :checker languagetool)))
-                   (flycheck-languagetool--check-all results))))
-              (error
-               (funcall callback 'errored (error-message-string err)))))))
-    (kill-buffer)
-    (funcall callback 'interrupted nil)))
+            (funcall callback 'errored (error-message-string err)))
+        (kill-buffer)))
+     (t
+      (set-buffer-multibyte t)
+      (goto-char url-http-end-of-headers)
+      (let ((results (car (flycheck-parse-json
+                           (buffer-substring (point) (point-max))))))
+        (kill-buffer)
+        (with-current-buffer source-buffer
+          (condition-case err
+              (funcall
+               callback 'finished
+               (flycheck-increment-error-columns
+                (mapcar
+                 (lambda (x)
+                   (apply #'flycheck-error-new-at
+                          `(,@x :checker languagetool)))
+                 (flycheck-languagetool--check-all results))))
+            (error
+             (funcall callback 'errored (error-message-string err))))))))))
 
 (defun flycheck-languagetool--start-server ()
   "Start the LanguageTool server if we didn’t already."

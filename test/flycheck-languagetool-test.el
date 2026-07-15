@@ -148,6 +148,38 @@ Uses a list (not a vector) for the matches array, matching what
     (should (= 1 call-count))
     (should (eq 'errored (car callback-statuses)))))
 
+(ert-deftest flt-test-read-results/transport-error-without-headers ()
+  "A transport error without HTTP headers calls callback with `errored'."
+  (let ((call-count 0)
+        callback-status
+        callback-message
+        response-buf)
+    (let ((source-buf (generate-new-buffer " *flt-source*")))
+      (unwind-protect
+          (progn
+            (setq response-buf (generate-new-buffer " *flt-response*"))
+            (with-current-buffer response-buf
+              (setq-local url-http-end-of-headers nil)
+              (flycheck-languagetool--read-results
+               '(:error
+                 (error connection-failed
+                        "connection broken by remote peer\n"
+                        :host "localhost" :service 8081))
+               source-buf
+               (lambda (status &optional message)
+                 (cl-incf call-count)
+                 (setq callback-status status
+                       callback-message message)))))
+        (when (buffer-live-p source-buf)
+          (kill-buffer source-buf))
+        (when (buffer-live-p response-buf)
+          (kill-buffer response-buf))))
+    (should (= 1 call-count))
+    (should (eq 'errored callback-status))
+    (should (string-match-p "connection broken by remote peer"
+                            callback-message))
+    (should-not (buffer-live-p response-buf))))
+
 (ert-deftest flt-test-read-results/successful-parse ()
   "A well-formed response calls callback once with `finished'."
   (let ((call-count 0)
