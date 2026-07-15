@@ -32,6 +32,7 @@
 
 ;;; Code:
 
+(require 'diff-mode)
 (require 'flycheck)
 (eval-when-compile (require 'subr-x))
 
@@ -154,6 +155,22 @@ or plan to start a local server some other way."
 These rules will be disabled if Emacs’ `flyspell-mode' or
 `jinx-mode' is active.")
 
+(defface flycheck-languagetool-suggestion-face
+  '((t (:inherit diff-changed)))
+  "Flycheck face for LanguageTool suggestions."
+  :group 'flycheck-languagetool)
+
+(defcustom flycheck-languagetool-suggestion-limit 12
+  "The maximum number of correction suggestions to show per warning.
+Any suggestions beyond this count will be ignored."
+  :type '(integer :tag "Count")
+  :safe (lambda (n)
+          (and (integerp n)
+               (< n 256))) ;; This number is somewhat picked out of the
+                           ;; air, but large values can hurt
+                           ;; performance.
+  :group 'flycheck-languagetool)
+
 ;;
 ;; (@* "External" )
 ;;
@@ -188,15 +205,39 @@ the LanguageTool request was in flight."
              (len (cdr (assoc 'length match)))
              (pt-end (+ pt-beg len)))
         (when (and (<= (point-min) pt-beg) (<= pt-end (point-max)))
-          (let ((ln (save-restriction
-                      (widen)
-                      (line-number-at-pos pt-beg)))
-                (type 'warning)
-                (id (cdr (assoc 'id (assoc 'rule match))))
-                (subid (cdr (assoc 'subId (assoc 'rule match))))
-                (desc (cdr (assoc 'message match)))
-                (col-start (flycheck-languagetool--column-at-pos pt-beg))
-                (col-end (flycheck-languagetool--column-at-pos pt-end)))
+          (let* ((ln (save-restriction
+                       (widen)
+                       (line-number-at-pos pt-beg)))
+                 (type 'warning)
+                 (id (cdr (assoc 'id (assoc 'rule match))))
+                 (subid (cdr (assoc 'subId (assoc 'rule match))))
+                 (replacements (cdr (assoc 'replacements match)))
+                 (desc
+                  (apply #'concat
+                         (cdr (assoc 'message match))
+                         (when replacements
+                           (list
+                            " Suggestions: "
+                            (mapconcat
+                             (lambda (replacement)
+                               (let ((suggestion
+                                      (cdr (assoc 'value replacement))))
+                                 (put-text-property
+                                  0
+                                  (length suggestion)
+                                  'face
+                                  'flycheck-languagetool-suggestion-face
+                                  suggestion)
+                                 suggestion))
+                             (seq-take replacements
+                                       flycheck-languagetool-suggestion-limit)
+                             ", ")
+                            (if (> (length replacements)
+                                   flycheck-languagetool-suggestion-limit)
+                                "…"
+                              ".")))))
+                 (col-start (flycheck-languagetool--column-at-pos pt-beg))
+                 (col-end (flycheck-languagetool--column-at-pos pt-end)))
             (push (list ln col-start type desc
                         :end-column col-end
                         :id (cons id subid))
