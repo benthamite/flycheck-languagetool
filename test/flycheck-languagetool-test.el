@@ -216,5 +216,60 @@ Uses a list (not a vector) for the matches array, matching what
     (should (eq 'finished callback-status))
     (should (= 1 (length callback-errors)))))
 
+;; ---------------------------------------------------------------------------
+;; flycheck-languagetool--start-server
+;; ---------------------------------------------------------------------------
+
+(defmacro flt-test--with-fake-server (script &rest body)
+  "Run BODY with the server command replaced by the shell SCRIPT.
+Kills the fake server and its buffer afterwards."
+  (declare (indent 1))
+  `(let ((flycheck-languagetool-server-command (list "sh" "-c" ,script))
+         (flycheck-languagetool-server-args nil)
+         (flycheck-languagetool--started-server t))
+     (unwind-protect
+         (progn ,@body)
+       (when-let ((process (get-process "languagetool-server")))
+         (delete-process process))
+       (when-let ((buffer (get-buffer " *LanguageTool server*")))
+         (kill-buffer buffer)))))
+
+(defun flt-test--wait-for-exit (process)
+  "Wait until PROCESS has exited and its sentinel has run."
+  (while (process-live-p process)
+    (accept-process-output process 0.1))
+  (accept-process-output nil 0.1))
+
+(ert-deftest flt-test-start-server/restart-after-exit ()
+  "A server that exits after starting is restarted by the next check."
+  (flt-test--with-fake-server "echo ' Server started'; sleep 30"
+    (flycheck-languagetool--start-server)
+    (let ((process (get-process "languagetool-server")))
+      (should (process-get process 'flycheck-languagetool-ready))
+      (kill-process process)
+      (flt-test--wait-for-exit process))
+    (should-not flycheck-languagetool--started-server)))
+
+(ert-deftest flt-test-start-server/no-restart-after-failed-start ()
+  "A server that exits before starting is not restarted."
+  (flt-test--with-fake-server "exit 1"
+    (flycheck-languagetool--start-server)
+    (flt-test--wait-for-exit (get-buffer-process " *LanguageTool server*"))
+    (should flycheck-languagetool--started-server)))
+
+(ert-deftest flt-test-start-server/ignores-stale-startup-message ()
+  "Output left by a previous server does not count as a start."
+  (with-current-buffer (get-buffer-create " *LanguageTool server*")
+    (insert "2026-01-01 INFO Server started\n"))
+  (flt-test--with-fake-server "sleep 30"
+    (cl-letf (((symbol-function 'accept-process-output)
+               (lambda (&rest _) (throw 'waited t))))
+      ;; The new server prints nothing, so the startup check must wait.
+      (should (catch 'waited
+                (flycheck-languagetool--start-server)
+                nil)))
+    (should-not (process-get (get-process "languagetool-server")
+                             'flycheck-languagetool-ready))))
+
 (provide 'flycheck-languagetool-test)
 ;;; flycheck-languagetool-test.el ends here

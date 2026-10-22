@@ -116,7 +116,9 @@ or plan to start a local server some other way."
   :group 'flycheck-languagetool)
 
 (defvar flycheck-languagetool--started-server nil
-  "Have we ever attempted to start the LanguageTool server?")
+  "Have we attempted to start the LanguageTool server?
+Reset when a server that started successfully exits, so that the next
+check starts a new one.")
 
 (defvar flycheck-languagetool--spelling-rules
   '("HUNSPELL_RULE"
@@ -279,6 +281,16 @@ CALLBACK is passed from Flycheck."
             (error
              (funcall callback 'errored (error-message-string err))))))))))
 
+(defun flycheck-languagetool--server-sentinel (process event)
+  "Let the next check restart the server if PROCESS dies after starting.
+A server that never reported a successful start is not restarted, so
+a broken command is tried only once.  EVENT is passed on to
+`internal-default-process-sentinel'."
+  (internal-default-process-sentinel process event)
+  (when (and (memq (process-status process) '(exit signal))
+             (process-get process 'flycheck-languagetool-ready))
+    (setq flycheck-languagetool--started-server nil)))
+
 (defun flycheck-languagetool--start-server ()
   "Start the LanguageTool server if we didn’t already."
   (unless (process-live-p (get-process "languagetool-server"))
@@ -286,16 +298,24 @@ CALLBACK is passed from Flycheck."
                     (list "java" "-cp" (expand-file-name flycheck-languagetool-server-jar)
                           "org.languagetool.server.HTTPServer"
                           "--port" (format "%s" flycheck-languagetool-server-port))))
+           (buffer (get-buffer-create " *LanguageTool server*"))
            (process
-            (apply #'start-process
-                   "languagetool-server"
-                   " *LanguageTool server*"
-                   (append cmd flycheck-languagetool-server-args))))
+            (progn
+              ;; Output from a previous server would satisfy the
+              ;; startup check below before this one is listening.
+              (with-current-buffer buffer (erase-buffer))
+              (apply #'start-process
+                     "languagetool-server"
+                     buffer
+                     (append cmd flycheck-languagetool-server-args)))))
       (set-process-query-on-exit-flag process nil)
+      (set-process-sentinel process #'flycheck-languagetool--server-sentinel)
       (while
-          (with-current-buffer (process-buffer process)
+          (with-current-buffer buffer
             (goto-char (point-min))
-            (unless (re-search-forward " Server started$" nil t)
+            (if (re-search-forward " Server started$" nil t)
+                (progn (process-put process 'flycheck-languagetool-ready t)
+                       nil)
               (accept-process-output process 1)
               (process-live-p process)))))))
 

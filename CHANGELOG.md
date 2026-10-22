@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [Unreleased]
+
+### Fixed
+
+- Restart the LanguageTool server when it exits after starting, instead
+  of failing every check until Emacs restarts.
+- Wait for the new server’s startup message rather than one left in
+  the process buffer by a previous server.
+
 ## [0.4.2] - 2026-02-18
 
 ### Fixed

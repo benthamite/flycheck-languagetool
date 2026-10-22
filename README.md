@@ -51,6 +51,8 @@ modes if you would prefer LanguageTool to check for spelling mistakes.
 
 You can find log messages from a local LanguageTool server in a hidden buffer called ` *LanguageTool server*`.
 
+If a local server that started successfully exits, the next check starts a new one. A server that fails to start is not retried until Emacs restarts.
+
 ## 🛠️ Contribute
 
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](http://makeapullrequest.com)
