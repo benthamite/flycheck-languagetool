@@ -323,6 +323,42 @@ out-of-bounds matches."
     (should (= 1 (length callback-errors)))))
 
 ;; ---------------------------------------------------------------------------
+;; flycheck-languagetool-max-buffer-size
+;; ---------------------------------------------------------------------------
+
+(ert-deftest flt-test-size-limit/default ()
+  "The default limit is 200000 characters."
+  (should (= 200000 (default-value 'flycheck-languagetool-max-buffer-size))))
+
+(ert-deftest flt-test-size-limit/predicate ()
+  "Buffers over the limit are refused; at the limit or with nil, accepted."
+  (with-temp-buffer
+    (insert (make-string 100 ?a))
+    (let ((flycheck-languagetool-max-buffer-size 100))
+      (should (flycheck-languagetool--within-size-limit)))
+    (let ((flycheck-languagetool-max-buffer-size 99))
+      (should-not (flycheck-languagetool--within-size-limit)))
+    (let ((flycheck-languagetool-max-buffer-size nil))
+      (should (flycheck-languagetool--within-size-limit)))))
+
+(ert-deftest flt-test-size-limit/ignores-narrowing ()
+  "The limit applies to the whole buffer even when it is narrowed."
+  (with-temp-buffer
+    (insert (make-string 100 ?a))
+    (narrow-to-region 1 10)
+    (let ((flycheck-languagetool-max-buffer-size 50))
+      (should-not (flycheck-languagetool--within-size-limit)))))
+
+(ert-deftest flt-test-size-limit/checker-predicate ()
+  "Flycheck consults the size limit before using the checker."
+  (with-temp-buffer
+    (insert (make-string 100 ?a))
+    (let ((flycheck-languagetool-max-buffer-size 50))
+      (should-not (funcall (flycheck-checker-get 'languagetool 'predicate))))
+    (let ((flycheck-languagetool-max-buffer-size nil))
+      (should (funcall (flycheck-checker-get 'languagetool 'predicate))))))
+
+;; ---------------------------------------------------------------------------
 ;; flycheck-languagetool--start-server
 ;; ---------------------------------------------------------------------------
 

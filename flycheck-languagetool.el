@@ -115,6 +115,16 @@ or plan to start a local server some other way."
           "https://languagetool.org/http-api/swagger-ui/#!/default/post_check")
   :group 'flycheck-languagetool)
 
+(defcustom flycheck-languagetool-max-buffer-size 200000
+  "Largest buffer, in characters, that LanguageTool checks.
+Flycheck does not run the checker in a buffer whose `buffer-size'
+exceeds this, since LanguageTool can return many thousands of
+matches for a large buffer.  Nil means no limit."
+  :type '(choice (const :tag "No limit" nil)
+                 (integer :tag "Characters"))
+  :safe (lambda (value) (or (null value) (natnump value)))
+  :group 'flycheck-languagetool)
+
 (defvar flycheck-languagetool--started-server nil
   "Have we attempted to start the LanguageTool server?
 Reset when a server that started successfully exits, so that the next
@@ -422,6 +432,11 @@ a broken command is tried only once.  EVENT is passed on to
               (file-exists-p flycheck-languagetool-server-jar)
               (executable-find "java")))))
 
+(defun flycheck-languagetool--within-size-limit ()
+  "Is the buffer within `flycheck-languagetool-max-buffer-size'?"
+  (or (null flycheck-languagetool-max-buffer-size)
+      (<= (buffer-size) flycheck-languagetool-max-buffer-size)))
+
 (defun flycheck-languagetool--verify (_checker)
   "Verify proper configuration of Flycheck _CHECKER `languagetool'."
   (list
@@ -477,6 +492,7 @@ a broken command is tried only once.  EVENT is passed on to
   :enabled #'flycheck-languagetool--enabled
   :verify #'flycheck-languagetool--verify
   :error-explainer #'flycheck-languagetool--error-explainer
+  :predicate #'flycheck-languagetool--within-size-limit
   :modes flycheck-languagetool-active-modes
   :next-checkers '(proselint))
 

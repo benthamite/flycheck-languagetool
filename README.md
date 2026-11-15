@@ -37,6 +37,7 @@ The instruction to use this plugin.
 * `flycheck-languagetool-active-modes` (Default: `text-mode`, `latex-mode`, `org-mode`, `markdown-mode`, `message-mode`)
 * `flycheck-languagetool-language` (Default: `"en-US"`)
 * `flycheck-languagetool-check-params`
+* `flycheck-languagetool-max-buffer-size` (Default: 200000 characters; `nil` for no limit)
 
 You’ll need to set at least one of `flycheck-languagetool-server-jar` or `flycheck-languagetool-url`.  The rest are optional.
 

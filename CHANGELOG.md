@@ -6,6 +6,11 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Added
+
+- `flycheck-languagetool-max-buffer-size`: skip buffers larger than this
+  many characters (default 200000; `nil` for no limit).
+
 ### Fixed
 
 - Restart the LanguageTool server when it exits after starting, instead
