@@ -12,6 +12,9 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
   of failing every check until Emacs restarts.
 - Wait for the new server’s startup message rather than one left in
   the process buffer by a previous server.
+- Map LanguageTool matches to line numbers in one pass over the buffer,
+  instead of counting from the buffer start for every match, which froze
+  Emacs for seconds on buffers with thousands of matches.
 
 ## [0.4.2] - 2026-02-18
 

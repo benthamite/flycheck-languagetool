@@ -100,6 +100,112 @@ Uses a list (not a vector) for the matches array, matching what
       (should (= 1 (length errors)))
       (should (= 2 (nth 0 (car errors))))))) ; line 2
 
+;; The original implementation, which counted lines from the buffer
+;; start for every match.  Kept as the reference that the linear
+;; version must reproduce exactly.
+(defun flt-test--check-all-reference (results)
+  "Map RESULTS to errors as the original quadratic implementation did."
+  (let ((matches (cdr (assoc 'matches results)))
+        check-list)
+    (dolist (match matches)
+      (let* ((pt-beg (+ (point-min) (cdr (assoc 'offset match))))
+             (len (cdr (assoc 'length match)))
+             (pt-end (+ pt-beg len)))
+        (when (and (<= (point-min) pt-beg) (<= pt-end (point-max)))
+          (let* ((ln (save-restriction
+                       (widen)
+                       (line-number-at-pos pt-beg)))
+                 (id (cdr (assoc 'id (assoc 'rule match))))
+                 (subid (cdr (assoc 'subId (assoc 'rule match))))
+                 (col-start (flycheck-languagetool--column-at-pos pt-beg))
+                 (col-end (flycheck-languagetool--column-at-pos pt-end)))
+            (push (list ln col-start 'warning (cdr (assoc 'message match))
+                        :end-column col-end
+                        :id (cons id subid))
+                  check-list)))))
+    check-list))
+
+(defconst flt-test--multiline-text
+  "First line.\n\n\tTabbed third line here.\nFourth line \u00e9 \u4e2d\u6587 wide.\n\nSixth line\nlast"
+  "Text with empty lines, a tab, wide characters and no final newline.")
+
+(defun flt-test--unsorted-matches ()
+  "Return matches for `flt-test--multiline-text' in scrambled order.
+Includes duplicates, a match on a newline, one at the very end, and
+out-of-bounds matches."
+  (list (flt-test--make-match 40 3 "m1")
+        (flt-test--make-match 0 5 "m2")
+        (flt-test--make-match 13 7 "m3")
+        (flt-test--make-match 500 2 "out of bounds")
+        (flt-test--make-match 11 1 "on newline")
+        (flt-test--make-match 40 3 "duplicate of m1")
+        (flt-test--make-match 12 1 "empty line")
+        (flt-test--make-match (1- (length flt-test--multiline-text)) 1 "last")
+        (flt-test--make-match (length flt-test--multiline-text) 0 "at end")
+        (flt-test--make-match 60 2 "m4")
+        (flt-test--make-match 5 100 "end out of bounds")
+        (flt-test--make-match 30 4 "m5")))
+
+(ert-deftest flt-test-check-all/matches-reference-unsorted ()
+  "Unsorted matches on many lines map exactly as the old code did."
+  (with-temp-buffer
+    (insert flt-test--multiline-text)
+    (let ((results (apply #'flt-test--make-results (flt-test--unsorted-matches))))
+      (should (equal (flt-test--check-all-reference results)
+                     (flycheck-languagetool--check-all results)))
+      (should (= 10 (length (flycheck-languagetool--check-all results)))))))
+
+(ert-deftest flt-test-check-all/matches-reference-narrowed ()
+  "In a narrowed buffer, lines count from the true start as before."
+  (with-temp-buffer
+    (insert "before\nnarrowing\n" flt-test--multiline-text "\nafter\n")
+    (narrow-to-region 18 (+ 18 (length flt-test--multiline-text)))
+    (let ((results (apply #'flt-test--make-results (flt-test--unsorted-matches))))
+      (should (equal (flt-test--check-all-reference results)
+                     (flycheck-languagetool--check-all results)))
+      (should (= 6 (nth 0 (car (last (flycheck-languagetool--check-all
+                                      results)))))))))
+
+(ert-deftest flt-test-check-all/matches-reference-random ()
+  "Random matches over a large buffer map exactly as the old code did."
+  (with-temp-buffer
+    (dotimes (i 2000)
+      (insert (make-string (% (* i 7) 23) ?x) "\n"))
+    (let* ((state (cl-make-random-state 42))
+           (size (buffer-size))
+           (results (apply #'flt-test--make-results
+                           (cl-loop repeat 3000
+                                    collect (flt-test--make-match
+                                             (cl-random (+ size 20) state)
+                                             (cl-random 10 state))))))
+      (should (equal (flt-test--check-all-reference results)
+                     (flycheck-languagetool--check-all results))))))
+
+(ert-deftest flt-test-check-all/scales-linearly ()
+  "Many matches on a large buffer are mapped without per-match rescans."
+  (with-temp-buffer
+    (dotimes (_ 40000)
+      (insert "Some words on a line of prose text.\n"))
+    (let* ((size (buffer-size))
+           (results (apply #'flt-test--make-results
+                           (cl-loop for i below 10000
+                                    collect (flt-test--make-match
+                                             (% (* i 7919) (- size 5)) 4))))
+           (line-calls 0)
+           (start (float-time))
+           errors)
+      (cl-letf* ((orig (symbol-function 'line-number-at-pos))
+                 ((symbol-function 'line-number-at-pos)
+                  (lambda (&rest args)
+                    (cl-incf line-calls)
+                    (apply orig args))))
+        (setq errors (flycheck-languagetool--check-all results)))
+      (should (= 10000 (length errors)))
+      ;; The structural check is the reliable one: no per-match scan
+      ;; from the buffer start.  The time bound is deliberately loose.
+      (should (= 0 line-calls))
+      (should (< (- (float-time) start) 30.0)))))
+
 ;; ---------------------------------------------------------------------------
 ;; flycheck-languagetool--read-results — callback semantics
 ;; ---------------------------------------------------------------------------

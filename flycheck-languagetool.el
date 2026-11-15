@@ -200,51 +200,86 @@ Any suggestions beyond this count will be ignored."
 Matches whose offsets fall outside the current buffer bounds are
 silently skipped, since the buffer may have been modified while
 the LanguageTool request was in flight."
-  (let ((matches (cdr (assoc 'matches results)))
-        check-list)
+  (let* ((spans (flycheck-languagetool--match-spans
+                 (cdr (assoc 'matches results))))
+         (lines (flycheck-languagetool--line-numbers
+                 (mapcar #'cadr spans)))
+         check-list)
+    (dolist (span spans)
+      (let* ((match (nth 0 span))
+             (pt-beg (nth 1 span))
+             (pt-end (nth 2 span))
+             (ln (pop lines))
+             (type 'warning)
+             (id (cdr (assoc 'id (assoc 'rule match))))
+             (subid (cdr (assoc 'subId (assoc 'rule match))))
+             (replacements (cdr (assoc 'replacements match)))
+             (desc
+              (apply #'concat
+                     (cdr (assoc 'message match))
+                     (when replacements
+                       (list
+                        " Suggestions: "
+                        (mapconcat
+                         (lambda (replacement)
+                           (let ((suggestion
+                                  (cdr (assoc 'value replacement))))
+                             (put-text-property
+                              0
+                              (length suggestion)
+                              'face
+                              'flycheck-languagetool-suggestion-face
+                              suggestion)
+                             suggestion))
+                         (seq-take replacements
+                                   flycheck-languagetool-suggestion-limit)
+                         ", ")
+                        (if (> (length replacements)
+                               flycheck-languagetool-suggestion-limit)
+                            "…"
+                          ".")))))
+             (col-start (flycheck-languagetool--column-at-pos pt-beg))
+             (col-end (flycheck-languagetool--column-at-pos pt-end)))
+        (push (list ln col-start type desc
+                    :end-column col-end
+                    :id (cons id subid))
+              check-list)))
+    check-list))
+
+(defun flycheck-languagetool--match-spans (matches)
+  "Return (MATCH BEG END) for each of MATCHES inside the accessible buffer.
+BEG and END are the buffer positions of the text that MATCH covers.
+Matches that extend outside the accessible portion of the buffer are
+left out, and the rest keep their order."
+  (let (spans)
     (dolist (match matches)
       (let* ((pt-beg (+ (point-min) (cdr (assoc 'offset match))))
-             (len (cdr (assoc 'length match)))
-             (pt-end (+ pt-beg len)))
+             (pt-end (+ pt-beg (cdr (assoc 'length match)))))
         (when (and (<= (point-min) pt-beg) (<= pt-end (point-max)))
-          (let* ((ln (save-restriction
-                       (widen)
-                       (line-number-at-pos pt-beg)))
-                 (type 'warning)
-                 (id (cdr (assoc 'id (assoc 'rule match))))
-                 (subid (cdr (assoc 'subId (assoc 'rule match))))
-                 (replacements (cdr (assoc 'replacements match)))
-                 (desc
-                  (apply #'concat
-                         (cdr (assoc 'message match))
-                         (when replacements
-                           (list
-                            " Suggestions: "
-                            (mapconcat
-                             (lambda (replacement)
-                               (let ((suggestion
-                                      (cdr (assoc 'value replacement))))
-                                 (put-text-property
-                                  0
-                                  (length suggestion)
-                                  'face
-                                  'flycheck-languagetool-suggestion-face
-                                  suggestion)
-                                 suggestion))
-                             (seq-take replacements
-                                       flycheck-languagetool-suggestion-limit)
-                             ", ")
-                            (if (> (length replacements)
-                                   flycheck-languagetool-suggestion-limit)
-                                "…"
-                              ".")))))
-                 (col-start (flycheck-languagetool--column-at-pos pt-beg))
-                 (col-end (flycheck-languagetool--column-at-pos pt-end)))
-            (push (list ln col-start type desc
-                        :end-column col-end
-                        :id (cons id subid))
-                  check-list)))))
-    check-list))
+          (push (list match pt-beg pt-end) spans))))
+    (nreverse spans)))
+
+(defun flycheck-languagetool--line-numbers (positions)
+  "Return the line numbers of POSITIONS, in the order given.
+Lines are counted in the widened buffer, as `line-number-at-pos' does
+after `widen'.  POSITIONS need not be sorted.  They are visited in
+increasing order and lines are counted from the previous one, so the
+cost grows with the buffer size plus the number of POSITIONS rather
+than with their product."
+  (let ((indexed (let ((index -1))
+                   (mapcar (lambda (pos) (cons pos (setq index (1+ index))))
+                           positions)))
+        (lines (make-vector (length positions) nil))
+        (line 1))
+    (save-excursion
+      (save-restriction
+        (widen)
+        (goto-char (point-min))
+        (dolist (entry (sort indexed #'car-less-than-car))
+          (while (search-forward "\n" (car entry) t)
+            (setq line (1+ line)))
+          (aset lines (cdr entry) line))))
+    (append lines nil)))
 
 (defun flycheck-languagetool--read-results (status source-buffer callback)
   "Callback for results from LanguageTool API.
